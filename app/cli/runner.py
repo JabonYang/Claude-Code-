@@ -1,0 +1,149 @@
+import asyncio
+import os
+import subprocess
+import shutil
+import time
+import uuid
+from pathlib import Path
+
+from app.config import settings
+from app.feishu.client import send_text_message, send_error_message
+from app.cli.snapshot import create_snapshots, get_diff_summary
+
+FEISHU_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+_sessions: dict[str, str] = {}
+_locks: dict[str, asyncio.Lock] = {}
+_session_created: set[str] = set()
+
+
+def session_id_for(chat_id: str) -> str:
+    if chat_id not in _sessions:
+        sid = str(uuid.uuid5(FEISHU_NAMESPACE, chat_id))
+        _sessions[chat_id] = sid
+    return _sessions[chat_id]
+
+
+def _get_lock(chat_id: str) -> asyncio.Lock:
+    if chat_id not in _locks:
+        _locks[chat_id] = asyncio.Lock()
+    return _locks[chat_id]
+
+
+async def run_claude(chat_id: str, user_message: str) -> None:
+    lock = _get_lock(chat_id)
+    if lock.locked():
+        send_text_message(chat_id, "我正在处理上一条消息，请稍候...")
+        return
+
+    async with lock:
+        await _run_claude_locked(chat_id, user_message)
+
+
+async def _run_claude_locked(chat_id: str, user_message: str) -> None:
+    sid = session_id_for(chat_id)
+    is_new_session = sid not in _session_created
+
+    git_sha, _ = create_snapshots(chat_id)
+
+    claude_path = _find_claude()
+    if not claude_path:
+        send_error_message(chat_id, "找不到 claude 命令，请检查 CLAUDE_PATH 配置")
+        return
+
+    work_dir = settings.claude_work_dir
+
+    # Use --session-id for first call, --resume for subsequent calls
+    if is_new_session:
+        session_flag = "--session-id"
+    else:
+        session_flag = "--resume"
+
+    cmd = [
+        claude_path, "-p", user_message,
+        session_flag, sid,
+        "--output-format", "text",
+        "--permission-mode", "bypassPermissions",
+    ]
+
+    output, error = await _spawn_claude(cmd, work_dir)
+
+    if error and "already in use" in error:
+        # Session still held by daemon — wait and retry
+        await asyncio.sleep(10)
+        output, error = await _spawn_claude(cmd, work_dir)
+        if error and "already in use" in error:
+            # Last resort: clear session and try fresh
+            _clear_session(sid)
+            _session_created.discard(sid)
+            cmd[3] = "--session-id"  # back to --session-id
+            output, error = await _spawn_claude(cmd, work_dir)
+
+    if error:
+        error_msg = error[:3000]
+        send_error_message(chat_id, f"执行出错:\n```\n{error_msg}\n```")
+        return
+
+    if output:
+        if len(output) > 5000:
+            output = output[:5000] + "\n\n...(输出过长已截断)"
+        send_text_message(chat_id, output)
+    else:
+        send_text_message(chat_id, "已完成。")
+
+    _session_created.add(sid)
+
+    if git_sha:
+        diff = get_diff_summary(chat_id)
+        if diff:
+            send_text_message(chat_id, diff)
+
+
+async def _spawn_claude(cmd: list, work_dir: str) -> tuple[str | None, str | None]:
+    """Spawn claude and return (output, error). Error is None on success."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=work_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=settings.claude_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            return None, "处理超时"
+
+        output = stdout.decode("utf-8", errors="replace").strip()
+        error_output = stderr.decode("utf-8", errors="replace").strip()
+
+        if process.returncode != 0:
+            return output or None, error_output or output or "未知错误"
+
+        return output or None, None
+
+    except Exception as e:
+        return None, str(e)
+
+
+def _clear_session(sid: str):
+    project_dir = Path(settings.claude_work_dir)
+    safe_name = str(project_dir).replace("/", "-")
+    session_file = Path.home() / ".claude" / "projects" / safe_name / f"{sid}.jsonl"
+    try:
+        if session_file.exists():
+            session_file.unlink()
+    except Exception:
+        pass
+
+
+def _find_claude() -> str | None:
+    path = settings.claude_path
+    if shutil.which(path):
+        return path
+    installed = shutil.which("claude")
+    if installed:
+        return installed
+    return None

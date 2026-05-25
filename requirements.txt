@@ -1,0 +1,5 @@
+fastapi>=0.115
+uvicorn[standard]>=0.34
+lark-oapi>=1.6.5
+python-dotenv>=1.1
+pydantic-settings>=2.7
