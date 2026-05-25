@@ -21,7 +21,7 @@
 ## 飞书配置
 
 - 应用类型：企业自建应用
-- Bot 名称：Coin
+- Bot 名称：你的 Bot 名称
 - 事件订阅：WebSocket 长连接模式（不需要回调 URL）
 - 权限：im:message, im:message:send_as_bot, im:chat, im:chat:read, im:chat:write
 - Bot 加入群聊：通过群设置 → 群机器人 → 添加（非添加成员）
@@ -31,7 +31,7 @@
 - 每个 chat_id → UUID v5（namespace: 6ba7b810-9dad-11d1-80b4-00c04fd430c8）
 - 首次 `--session-id`，后续 `--resume`
 - "already in use" → 等待 10s 重试 → 仍失败则清除 .jsonl 文件重试
-- Session 文件位置：`~/.claude/projects/-Users-ych/<uuid>.jsonl`
+- Session 文件位置：`~/.claude/projects/-home-your-username/<uuid>.jsonl`
 
 ## 安全三层
 
@@ -42,7 +42,7 @@
 ## 开发命令
 
 ```bash
-cd /Users/ych/feishu-claude-bot
+cd /path/to/your/project
 source .venv/bin/activate
 uvicorn app.main:app --reload --port 8080
 

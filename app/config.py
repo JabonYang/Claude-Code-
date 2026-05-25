@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Claude Code CLI
     claude_path: str = "claude"
-    claude_work_dir: str = "/Users/ych"
+    claude_work_dir: str = "/home/your-username"
     claude_timeout_seconds: int = 300
 
     # Safety

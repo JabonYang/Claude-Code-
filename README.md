@@ -21,8 +21,8 @@
 ### 2. 安装
 
 ```bash
-git clone https://github.com/JabonYang/Claude-Code-.git
-cd Claude-Code-
+git clone https://github.com/your-username/your-repo.git
+cd your-repo
 bash scripts/setup.sh
 ```
 
@@ -33,7 +33,7 @@ bash scripts/setup.sh
 ```env
 FEISHU_APP_ID=cli_xxxxxxxx
 FEISHU_APP_SECRET=xxxxxx
-CLAUDE_WORK_DIR=/Users/ych
+CLAUDE_WORK_DIR=/home/your-username
 ```
 
 ### 4. 飞书应用配置
@@ -43,7 +43,7 @@ CLAUDE_WORK_DIR=/Users/ych
 3. 添加权限：`im:message`、`im:message:send_as_bot`、`im:chat`
 4. 事件订阅 → **使用长连接接收事件**（WebSocket 模式）
 5. 创建版本并发布
-6. 在飞书群设置 → 群机器人 → 添加自己设置的机器人名称
+6. 在飞书群设置 → 群机器人 → 添加你的 Bot
 
 ### 5. 启动
 
