@@ -43,7 +43,7 @@ CLAUDE_WORK_DIR=/Users/ych
 3. 添加权限：`im:message`、`im:message:send_as_bot`、`im:chat`
 4. 事件订阅 → **使用长连接接收事件**（WebSocket 模式）
 5. 创建版本并发布
-6. 在飞书群设置 → 群机器人 → 添加 Coin
+6. 在飞书群设置 → 群机器人 → 添加自己设置的机器人名称
 
 ### 5. 启动
 
