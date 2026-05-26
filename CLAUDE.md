@@ -6,13 +6,23 @@
 
 ```
 飞书用户 → WebSocket → FastAPI → handler.py → safety.py (预扫描) → snapshot.py (Git/TM快照) → runner.py (spawn claude -p) → 飞书回复
+                                                                     ↑
+    ┌────────────────────────────────────────────────────────────────┘
+    │  三个后台线程 (lifespan 中启动)
+    ├─ WS 线程: WebSocket 长连接 + 断线重连 + 凭证失效检测
+    ├─ 监控线程: 系统休眠唤醒感知 (30s tick)
+    └─ FastAPI 主线程: 消息处理 + /health + /reload
 ```
 
 ## Key Files
 
-- `app/main.py` — FastAPI + WebSocket 客户端（lark-oapi），lifespan 中启动 WS 监听线程
+- `app/main.py` — FastAPI + WebSocket 客户端（lark-oapi），lifespan 中启动 WS + 监控线程
+  - **WS 重连**: `client.start()` 返回后外层 while 循环永不放弃，指数退避 2s→30s
+  - **凭证失效检测**: 连续快速失败 3 次后调 `validate_credentials()` 验证，凭证被拒则停止线程
+  - **热重载**: `POST /reload` 重新读取 .env 并重启 WS 线程
+  - **系统感知**: 监控线程每 30s 检测时间跳变判断休眠唤醒
 - `app/feishu/handler.py` — 消息路由：内置命令（回退/快照）、安全扫描、确认拦截、转发到 CLI
-- `app/feishu/client.py` — 飞书 API：发文本、发卡片、tenant token 缓存
+- `app/feishu/client.py` — 飞书 API：发文本、发卡片、tenant token 缓存、凭证验证
 - `app/cli/runner.py` — spawn `claude -p --session-id <uuid> --permission-mode bypassPermissions`，首次用 `--session-id` 后续用 `--resume`，async lock 防并发，retry on "already in use"
 - `app/cli/safety.py` — 消息预扫描（危险模式 → 拦截/确认），内置命令识别（回退/快照列表/回退到N）
 - `app/cli/snapshot.py` — Git 自动快照（执行前 commit）、Time Machine 快照、回退命令

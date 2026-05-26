@@ -6,7 +6,28 @@ from app.config import settings
 _token_cache: dict = {"token": "", "expires_at": 0}
 
 
-def _get_tenant_token() -> str:
+def validate_credentials() -> bool | None:
+    """Check if stored Feishu credentials are still valid.
+
+    Returns:
+        True   — credentials valid
+        False  — credentials rejected (app deleted / secret rotated)
+        None   — network error, cannot determine
+    """
+    try:
+        resp = httpx.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": settings.feishu_app_id, "app_secret": settings.feishu_app_secret},
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("code") == 0:
+            return True
+        # Non-zero code means credentials are bad
+        return False
+    except Exception:
+        return None
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"] - 60:
         return _token_cache["token"]
