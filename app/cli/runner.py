@@ -63,6 +63,8 @@ async def _run_claude_locked(chat_id: str, user_message: str) -> None:
         session_flag, sid,
         "--output-format", "text",
         "--permission-mode", "bypassPermissions",
+        "--append-system-prompt",
+        "回答完毕后直接结束，不要询问是否需要其他帮助。保持回复简洁。",
     ]
 
     output, error = await _spawn_claude(cmd, work_dir)
