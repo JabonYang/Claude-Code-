@@ -46,6 +46,9 @@ async def process_message_event(event: dict):
 
 
 async def _handle_message(event: dict):
+    import logging
+    _log = logging.getLogger("feishu-bot")
+
     message = event.get("message", {})
     chat_id = message.get("chat_id", "")
 
@@ -57,6 +60,7 @@ async def _handle_message(event: dict):
         text = ""
 
     text = re.sub(r"@_user_\d+", "", text).strip()
+    _log.info(f"Parsed message: chat_id={chat_id}, text={text[:100] if text else '(empty)'}")
     if not text:
         return
 
@@ -96,6 +100,7 @@ async def _handle_message(event: dict):
         send_card_message(chat_id, _build_confirm_card(text, scan_result.explanation))
         return
 
+    _log.info(f"Dispatching to Claude: chat_id={chat_id}, text={text[:50]}...")
     await run_claude(chat_id, text)
 
 

@@ -28,6 +28,9 @@ def validate_credentials() -> bool | None:
         return False
     except Exception:
         return None
+
+
+def _get_tenant_token() -> str:
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"] - 60:
         return _token_cache["token"]

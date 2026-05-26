@@ -30,12 +30,17 @@ def _get_lock(chat_id: str) -> asyncio.Lock:
 
 
 async def run_claude(chat_id: str, user_message: str) -> None:
+    import logging
+    _log = logging.getLogger("feishu-bot")
+
     lock = _get_lock(chat_id)
     if lock.locked():
+        _log.info(f"Lock held for chat {chat_id}, rejecting duplicate request")
         send_text_message(chat_id, "我正在处理上一条消息，请稍候...")
         return
 
     async with lock:
+        _log.info(f"Running Claude for chat {chat_id}: {user_message[:80]}...")
         await _run_claude_locked(chat_id, user_message)
 
 
