@@ -120,17 +120,46 @@ async def _spawn_claude(cmd: list, work_dir: str) -> tuple[str | None, str | Non
                 timeout=settings.claude_timeout_seconds,
             )
         except asyncio.TimeoutError:
-            process.kill()
-            return None, "处理超时"
+            # Try to read partial output before killing
+            partial = ""
+            err_partial = ""
+            try:
+                process.kill()
+                # Use communicate again (with short timeout) to collect any buffered output
+                try:
+                    remaining = await asyncio.wait_for(process.communicate(), timeout=5)
+                    partial = remaining[0].decode("utf-8", errors="replace").strip()
+                    err_partial = remaining[1].decode("utf-8", errors="replace").strip()
+                except asyncio.TimeoutError:
+                    pass
+            except Exception:
+                pass
+            detail = (
+                f"处理超时（超过 {settings.claude_timeout_seconds} 秒无响应）\n"
+                f"可能原因：任务较复杂、模型接口响应慢、或当前会话上下文过多。\n"
+                f"建议：尝试简化指令、清理会话（发「回退」），或稍后重试。"
+            )
+            if partial:
+                detail += f"\n\n以下是超时前已生成的部分内容：\n{partial[:1500]}"
+            elif err_partial:
+                detail += f"\n\n以下是错误详情：\n{err_partial[:1500]}"
+            return None, detail
 
         output = stdout.decode("utf-8", errors="replace").strip()
         error_output = stderr.decode("utf-8", errors="replace").strip()
 
         if process.returncode != 0:
-            return output or None, error_output or output or "未知错误"
+            msg = error_output or output or "未知错误（无详细错误信息）"
+            if output and output != msg:
+                msg = f"{msg}\n\n以下是输出内容：\n{output[:2000]}"
+            elif error_output and error_output != msg:
+                msg = f"{msg}\n\n以下是错误详情：\n{error_output[:2000]}"
+            return output or None, msg
 
         return output or None, None
 
+    except FileNotFoundError:
+        return None, "找不到 claude 命令，请检查 CLAUDE_PATH 配置"
     except Exception as e:
         return None, str(e)
 

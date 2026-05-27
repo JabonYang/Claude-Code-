@@ -40,6 +40,7 @@ def _build_event_handler():
         event_data = {
             "message": {
                 "chat_id": event.event.message.chat_id,
+                "message_id": event.event.message.message_id,
                 "content": event.event.message.content,
                 "message_type": event.event.message.message_type,
             },

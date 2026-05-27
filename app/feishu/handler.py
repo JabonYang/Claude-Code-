@@ -51,11 +51,20 @@ async def _handle_message(event: dict):
 
     message = event.get("message", {})
     chat_id = message.get("chat_id", "")
+    msg_type = message.get("message_type", "unknown")
+    message_id = message.get("message_id", "")
 
     content_str = message.get("content", "{}")
+    _log.info(f"Raw message: chat_id={chat_id}, msg_type={msg_type}, content={content_str[:200]}")
+
+    # Merge-forward: content in event is a placeholder, fetch via API
+    if msg_type == "merge_forward" and message_id:
+        content_str = await _fetch_message_content(message_id)
+        _log.info(f"Fetched merge_forward content ({len(content_str)} chars)")
+
     try:
         content = json.loads(content_str)
-        text = content.get("text", "")
+        text = _extract_text(content, msg_type)
     except (json.JSONDecodeError, TypeError):
         text = ""
 
@@ -101,7 +110,92 @@ async def _handle_message(event: dict):
         return
 
     _log.info(f"Dispatching to Claude: chat_id={chat_id}, text={text[:50]}...")
+    send_text_message(chat_id, _ack(text))
     await run_claude(chat_id, text)
+
+
+async def _fetch_message_content(message_id: str) -> str:
+    """Fetch full content of a merge_forward message via Feishu API."""
+    import httpx
+    from app.feishu.client import _get_tenant_token
+
+    try:
+        token = _get_tenant_token()
+        resp = httpx.get(
+            f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            timeout=15,
+        )
+        data = resp.json()
+        if data.get("code") == 0:
+            items = data.get("data", {}).get("items", [])
+            parts = []
+            for item in items:
+                body = item.get("body", {})
+                inner_content = body.get("content", "")
+                if inner_content:
+                    try:
+                        inner = json.loads(inner_content)
+                        parts.append(_extract_text(inner, body.get("msg_type", "text")))
+                    except (json.JSONDecodeError, TypeError):
+                        parts.append(str(inner_content))
+            return json.dumps({"text": "\n".join(parts)})
+        return "{}"
+    except Exception as e:
+        import logging
+        _log = logging.getLogger("feishu-bot")
+        _log.warning(f"Failed to fetch merge_forward content: {e}")
+        return "{}"
+
+
+def _extract_text(content: dict, msg_type: str) -> str:
+    """Extract plain text from various Feishu message content formats."""
+    # Plain text
+    if msg_type == "text":
+        return content.get("text", "")
+
+    # Rich text / post message
+    if msg_type == "post":
+        parts = []
+        for block in content.get("content", [[]]):
+            if isinstance(block, list):
+                for elem in block:
+                    if isinstance(elem, dict):
+                        parts.append(elem.get("text", ""))
+        return "\n".join(parts) if parts else json.dumps(content)
+
+    # Forwarded messages
+    if msg_type == "forward":
+        return content.get("content", json.dumps(content))
+
+    # Unknown type — try common fields
+    for key in ("text", "content", "title", "preview"):
+        if key in content and isinstance(content[key], str):
+            return content[key]
+
+    # Fallback: dump the entire content as text so something gets through
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _ack(text: str) -> str:
+    """Generate a short, contextual acknowledgment based on the message."""
+    t = text.strip().lower()
+    if any(w in t for w in ("写", "改", "修", "加", "添加", "创建", "生成", "实现", "开发")):
+        return "好的，开始处理。"
+    if any(w in t for w in ("查", "搜", "找", "看看", "看下", "分析", "review", "检查")):
+        return "正在查看..."
+    if any(w in t for w in ("运行", "执行", "跑", "测试", "部署", "重启")):
+        return "收到，开始执行。"
+    if any(w in t for w in ("解释", "说明", "是什么", "为什么")):
+        return "让我想想..."
+    if any(w in t for w in ("删除", "删", "清理", "移除")):
+        return "好的，马上处理。"
+    if t.endswith("?") or t.endswith("？") or t.endswith("吗"):
+        return "让我想想..."
+    return "收到。"
 
 
 def _decrypt(encrypt_data: str) -> dict | None:

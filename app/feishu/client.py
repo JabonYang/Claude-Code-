@@ -100,3 +100,69 @@ def send_card_message(chat_id: str, card: dict) -> bool:
         "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
         body,
     )
+
+
+# ── Bitable (多维表格) API ────────────────────────────────────────────
+
+def _bitable_request(method: str, url: str, body: dict | None = None) -> dict | None:
+    """通用 Bitable API 请求，返回完整 JSON 或 None"""
+    try:
+        token = _get_tenant_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        if method == "GET":
+            resp = httpx.get(url, headers=headers, timeout=15)
+        elif method == "POST":
+            resp = httpx.post(url, json=body, headers=headers, timeout=15)
+        elif method == "PATCH":
+            resp = httpx.patch(url, json=body, headers=headers, timeout=15)
+        else:
+            return None
+        data = resp.json()
+        if data.get("code") != 0:
+            print(f"[Bitable] API error: code={data.get('code')} msg={data.get('msg')}")
+            return None
+        return data.get("data", {})
+    except Exception as e:
+        print(f"[Bitable] Request failed: {e}")
+        return None
+
+
+def create_bitable_app(name: str) -> str | None:
+    """创建多维表格（base），返回 app_token"""
+    data = _bitable_request("POST", "https://open.feishu.cn/open-apis/bitable/v1/apps", {"name": name})
+    if data:
+        return data.get("app", {}).get("app_token")
+    return None
+
+
+def create_bitable_table(app_token: str, name: str, fields: list[dict]) -> str | None:
+    """在 base 中创建表，返回 table_id"""
+    data = _bitable_request(
+        "POST",
+        f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables",
+        {"table": {"name": name, "fields": fields}},
+    )
+    if data:
+        return data.get("table", {}).get("table_id")
+    return None
+
+
+def add_bitable_records(app_token: str, table_id: str, records: list[dict]) -> bool:
+    """批量添加记录，每条 record 格式: {"fields": {...}}"""
+    data = _bitable_request(
+        "POST",
+        f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_create",
+        {"records": records},
+    )
+    return data is not None
+
+
+def get_bitable_url(app_token: str, table_id: str | None = None) -> str:
+    """返回多维表格的浏览器访问 URL"""
+    url = f"https://bytedance.feishu.cn/base/{app_token}"
+    if table_id:
+        url += f"?table={table_id}"
+    return url
