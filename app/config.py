@@ -13,7 +13,10 @@ class Settings(BaseSettings):
     # Claude Code CLI
     claude_path: str = "claude"
     claude_work_dir: str = "/home/your-username"
-    claude_timeout_seconds: int = 300
+    claude_timeout_seconds: int = 300       # 保留兼容，不再用于 kill
+    claude_progress_interval: int = 60      # 进度消息间隔（秒）
+    claude_hard_timeout: int = 1800         # 硬超时（秒），防止进程永远不退出
+    claude_estimate_timeout: int = 30       # 评估阶段超时（秒）
 
     # Safety
     pre_scan_enabled: bool = True

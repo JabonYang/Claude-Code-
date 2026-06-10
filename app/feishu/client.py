@@ -90,6 +90,73 @@ def send_error_message(chat_id: str, error_text: str) -> bool:
     return send_text_message(chat_id, f"出错了\n{error_text}")
 
 
+def send_approval_card(chat_id: str, estimate: dict) -> bool:
+    """发送任务评估确认卡片。有现成方案时直接推荐，否则附「开始执行」和「取消」按钮。"""
+    feasible = estimate.get("feasible", True)
+    seconds = estimate.get("estimated_seconds", 0)
+    reason = estimate.get("reason", "")
+    plan = estimate.get("plan", "")
+    existing = estimate.get("existing_solution")
+
+    minutes = seconds // 60
+    secs = seconds % 60
+    time_str = f"约 {minutes} 分 {secs} 秒" if minutes else f"约 {secs} 秒"
+
+    # 有现成方案 → 推荐方案，不提供执行按钮
+    if existing:
+        content = f"**💡 发现现成方案**\n{existing}\n\n"
+        if reason:
+            content += f"**分析**：{reason}\n"
+        content += "\n建议直接使用该方案，无需自己开发。如果仍想自己实现，回复「开始执行」。"
+        template = "blue"
+        title = "💡 现成方案推荐"
+        show_execute_button = True
+    else:
+        status = "✅ 可行" if feasible else "❌ 不可行"
+        content = f"**{status}**\n"
+        content += f"**预估耗时**：{time_str}\n"
+        if reason:
+            content += f"**判断依据**：{reason}\n"
+        if plan:
+            content += f"**执行计划**：{plan}\n"
+        content += "\n请确认是否开始执行："
+        template = "green" if feasible else "red"
+        title = "📋 任务评估"
+        show_execute_button = feasible
+
+    elements = [{"tag": "div", "text": {"tag": "lark_md", "content": content}}]
+
+    if show_execute_button:
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "action",
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "✅ 开始执行"},
+                    "type": "primary",
+                    "value": {"action": "confirm_execution"},
+                },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "❌ 取消"},
+                    "type": "danger",
+                    "value": {"action": "cancel_execution"},
+                },
+            ],
+        })
+
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": template,
+        },
+        "elements": elements,
+    }
+    return send_card_message(chat_id, card)
+
+
 def send_card_message(chat_id: str, card: dict) -> bool:
     body = {
         "receive_id": chat_id,

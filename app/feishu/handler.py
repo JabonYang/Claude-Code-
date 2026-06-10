@@ -5,7 +5,13 @@ from fastapi import Request
 
 from app.config import settings
 from app.feishu.client import send_text_message, send_card_message
-from app.cli.runner import run_claude
+from app.cli.runner import (
+    run_claude_with_approval,
+    confirm_execution,
+    cancel_execution,
+    cancel_running_process,
+    get_pending_execution,
+)
 from app.cli.safety import (
     scan_message,
     UserCommand,
@@ -79,6 +85,22 @@ async def _handle_message(event: dict):
         approve_intercept(chat_id, text)
         return
 
+    # Confirmation for pending execution (两阶段：确认执行)
+    pending_exec = get_pending_execution(chat_id)
+    if pending_exec:
+        if text in ("开始执行", "执行", "确认", "开始", "是", "ok", "OK"):
+            await confirm_execution(chat_id)
+            return
+        elif text in ("取消", "取消执行", "不", "算了"):
+            cancel_execution(chat_id)
+            return
+
+    # 取消正在运行的任务
+    if text in ("取消", "取消执行", "停止", "终止"):
+        if cancel_running_process(chat_id):
+            send_text_message(chat_id, "正在终止任务...")
+        return  # 不管有没有运行中的任务，"取消"都不落到评估流程
+
     # Built-in commands
     cmd = UserCommand.detect(text)
     if cmd == UserCommand.ROLLBACK:
@@ -110,8 +132,8 @@ async def _handle_message(event: dict):
         return
 
     _log.info(f"Dispatching to Claude: chat_id={chat_id}, text={text[:50]}...")
-    send_text_message(chat_id, _ack(text))
-    await run_claude(chat_id, text)
+    send_text_message(chat_id, "收到，让我评估一下这个任务...")
+    await run_claude_with_approval(chat_id, text)
 
 
 async def _fetch_message_content(message_id: str) -> str:
