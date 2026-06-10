@@ -133,7 +133,8 @@ async def _handle_message(event: dict):
         return
 
     _log.info(f"Dispatching to Claude: chat_id={chat_id}, text={text[:50]}...")
-    send_text_message(chat_id, _ack(text))
+    ack = await _generate_ack(text)
+    send_text_message(chat_id, ack)
     await run_claude_with_approval(chat_id, text)
 
 
@@ -203,90 +204,45 @@ def _extract_text(content: dict, msg_type: str) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-# ── Acknowledgment templates ─────────────────────────────────────
+# ── Acknowledgment ───────────────────────────────────────────────
 
-_ACK_TEMPLATES = {
-    "create": [
-        "好嘞，这就去弄。",
-        "收到，我来搞一下。",
-        "行，马上安排。",
-        "好，这就开始写。",
-        "没问题，我来处理。",
-        "明白，这就动手。",
-    ],
-    "search": [
-        "好，我去看看。",
-        "行，我查一下。",
-        "收到，翻一翻。",
-        "好嘞，找找看。",
-        "我来看看什么情况。",
-        "好，我先了解一下。",
-    ],
-    "run": [
-        "好，跑起来。",
-        "收到，这就执行。",
-        "行，我来跑一下。",
-        "马上开始。",
-        "好嘞，动起来。",
-    ],
-    "explain": [
-        "好，我想想怎么说。",
-        "行，我理一下。",
-        "收到，我来解释解释。",
-        "好嘞，让我想想。",
-        "好，我梳理一下。",
-    ],
-    "delete": [
-        "收到，我来处理掉。",
-        "行，这就清理。",
-        "好，我来删。",
-        "好嘞，马上处理。",
-    ],
-    "fix": [
-        "好，我来看看怎么修。",
-        "收到，我来修一下。",
-        "行，我来搞定。",
-        "好嘞，我来看看问题在哪。",
-    ],
-    "question": [
-        "好，我想想。",
-        "嗯，让我想想。",
-        "好，我琢磨一下。",
-        "行，我来看看。",
-    ],
-    "default": [
-        "收到，我看看。",
-        "好，我来处理。",
-        "行，我看看。",
-        "好嘞。",
-        "收到。",
-        "嗯，我来弄。",
-    ],
-}
-
-_KEYWORD_MAP = {
-    "create": ("写", "改", "修", "加", "添加", "创建", "生成", "实现", "开发", "建", "搭建", "编写", "做一个", "搞一个", "写一个"),
-    "search": ("查", "搜", "找", "看看", "看下", "分析", "review", "检查", "调研", "了解", "对比", "评估"),
-    "run": ("运行", "执行", "跑", "测试", "部署", "重启", "启动", "构建", "打包", "发布"),
-    "explain": ("解释", "说明", "是什么", "为什么", "怎么理解", "什么意思", "原理", "区别"),
-    "delete": ("删除", "删", "清理", "移除", "去掉", "干掉", "清空"),
-    "fix": ("修", "修复", "fix", "bug", "报错", "出错", "异常", "问题", "故障"),
-}
+_FALLBACK_ACKS = ["收到，我看看。", "好，我来处理。", "行，我看看。", "好嘞。", "嗯，我来弄。"]
 
 
-def _ack(text: str) -> str:
-    """根据消息内容随机生成一个简短的回应。"""
-    t = text.strip().lower()
+async def _generate_ack(text: str) -> str:
+    """用 Claude 生成一句自然的简短回应。失败时降级为随机模板。"""
+    import logging
+    import shutil
+    _log = logging.getLogger("feishu-bot")
 
-    for category, keywords in _KEYWORD_MAP.items():
-        if any(w in t for w in keywords):
-            return random.choice(_ACK_TEMPLATES[category])
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        return random.choice(_FALLBACK_ACKS)
 
-    # 问号结尾 → question
-    if t.endswith("?") or t.endswith("？") or t.endswith("吗"):
-        return random.choice(_ACK_TEMPLATES["question"])
+    prompt = (
+        f"用户发来一条消息：「{text}」\n\n"
+        "请用一句简短的中文回复（10个字以内），表示你收到了，语气自然随意。"
+        "只输出回复内容，不要引号，不要其他任何内容。"
+    )
 
-    return random.choice(_ACK_TEMPLATES["default"])
+    try:
+        process = await asyncio.create_subprocess_exec(
+            claude_path, "-p", prompt,
+            "--output-format", "text",
+            "--permission-mode", "bypassPermissions",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10)
+        result = stdout.decode("utf-8", errors="replace").strip()
+        # 清理可能的引号或多余内容
+        result = result.strip('"\'').split("\n")[0].strip()
+        if result and len(result) <= 30:
+            return result
+        return random.choice(_FALLBACK_ACKS)
+    except Exception as e:
+        _log.warning(f"Ack generation failed: {e}")
+        return random.choice(_FALLBACK_ACKS)
 
 
 def _decrypt(encrypt_data: str) -> dict | None:
