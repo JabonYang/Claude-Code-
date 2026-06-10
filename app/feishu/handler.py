@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import re
 from fastapi import Request
 
@@ -132,7 +133,7 @@ async def _handle_message(event: dict):
         return
 
     _log.info(f"Dispatching to Claude: chat_id={chat_id}, text={text[:50]}...")
-    send_text_message(chat_id, "收到，让我评估一下这个任务...")
+    send_text_message(chat_id, _ack(text))
     await run_claude_with_approval(chat_id, text)
 
 
@@ -202,22 +203,90 @@ def _extract_text(content: dict, msg_type: str) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+# ── Acknowledgment templates ─────────────────────────────────────
+
+_ACK_TEMPLATES = {
+    "create": [
+        "好嘞，这就去弄。",
+        "收到，我来搞一下。",
+        "行，马上安排。",
+        "好，这就开始写。",
+        "没问题，我来处理。",
+        "明白，这就动手。",
+    ],
+    "search": [
+        "好，我去看看。",
+        "行，我查一下。",
+        "收到，翻一翻。",
+        "好嘞，找找看。",
+        "我来看看什么情况。",
+        "好，我先了解一下。",
+    ],
+    "run": [
+        "好，跑起来。",
+        "收到，这就执行。",
+        "行，我来跑一下。",
+        "马上开始。",
+        "好嘞，动起来。",
+    ],
+    "explain": [
+        "好，我想想怎么说。",
+        "行，我理一下。",
+        "收到，我来解释解释。",
+        "好嘞，让我想想。",
+        "好，我梳理一下。",
+    ],
+    "delete": [
+        "收到，我来处理掉。",
+        "行，这就清理。",
+        "好，我来删。",
+        "好嘞，马上处理。",
+    ],
+    "fix": [
+        "好，我来看看怎么修。",
+        "收到，我来修一下。",
+        "行，我来搞定。",
+        "好嘞，我来看看问题在哪。",
+    ],
+    "question": [
+        "好，我想想。",
+        "嗯，让我想想。",
+        "好，我琢磨一下。",
+        "行，我来看看。",
+    ],
+    "default": [
+        "收到，我看看。",
+        "好，我来处理。",
+        "行，我看看。",
+        "好嘞。",
+        "收到。",
+        "嗯，我来弄。",
+    ],
+}
+
+_KEYWORD_MAP = {
+    "create": ("写", "改", "修", "加", "添加", "创建", "生成", "实现", "开发", "建", "搭建", "编写", "做一个", "搞一个", "写一个"),
+    "search": ("查", "搜", "找", "看看", "看下", "分析", "review", "检查", "调研", "了解", "对比", "评估"),
+    "run": ("运行", "执行", "跑", "测试", "部署", "重启", "启动", "构建", "打包", "发布"),
+    "explain": ("解释", "说明", "是什么", "为什么", "怎么理解", "什么意思", "原理", "区别"),
+    "delete": ("删除", "删", "清理", "移除", "去掉", "干掉", "清空"),
+    "fix": ("修", "修复", "fix", "bug", "报错", "出错", "异常", "问题", "故障"),
+}
+
+
 def _ack(text: str) -> str:
-    """Generate a short, contextual acknowledgment based on the message."""
+    """根据消息内容随机生成一个简短的回应。"""
     t = text.strip().lower()
-    if any(w in t for w in ("写", "改", "修", "加", "添加", "创建", "生成", "实现", "开发")):
-        return "好的，开始处理。"
-    if any(w in t for w in ("查", "搜", "找", "看看", "看下", "分析", "review", "检查")):
-        return "正在查看..."
-    if any(w in t for w in ("运行", "执行", "跑", "测试", "部署", "重启")):
-        return "收到，开始执行。"
-    if any(w in t for w in ("解释", "说明", "是什么", "为什么")):
-        return "让我想想..."
-    if any(w in t for w in ("删除", "删", "清理", "移除")):
-        return "好的，马上处理。"
+
+    for category, keywords in _KEYWORD_MAP.items():
+        if any(w in t for w in keywords):
+            return random.choice(_ACK_TEMPLATES[category])
+
+    # 问号结尾 → question
     if t.endswith("?") or t.endswith("？") or t.endswith("吗"):
-        return "让我想想..."
-    return "收到。"
+        return random.choice(_ACK_TEMPLATES["question"])
+
+    return random.choice(_ACK_TEMPLATES["default"])
 
 
 def _decrypt(encrypt_data: str) -> dict | None:
